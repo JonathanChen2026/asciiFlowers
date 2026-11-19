@@ -542,7 +542,7 @@
     ctx.restore();
   }
 
-  function buildTitle(message) {
+  function buildTitle(message, stepX, stepY, vines = []) {
     const font = '96px Didot, "Bodoni 72", Georgia, serif';
     const padding = 18;
     const mask = document.createElement('canvas');
@@ -561,10 +561,7 @@
     ctx.fillStyle = '#fff';
 
     ctx.globalAlpha = 0.74;
-    for (const [index, direction, length, drop] of [
-      [0, 1, 0.86, 0], [3, -1, 0.65, 0.02], [8, -1, 0.78, 0],
-      [16, 1, 0.58, 0.12], [17, -1, 0.83, 0.04],
-    ]) {
+    for (const [index, direction, length, drop] of vines) {
       const advance = ctx.measureText(message[index]).width;
       const left = x + ctx.measureText(message.slice(0, index)).width;
       const anchor = left + advance * (direction > 0 ? 0.22 : 0.82);
@@ -579,8 +576,6 @@
 
     const pixels = ctx.getImageData(0, 0, width, height).data;
     const cells = [];
-    const stepX = 2;
-    const stepY = 2.25;
     for (let y = stepY / 2; y < height; y += stepY) {
       for (let x = stepX / 2; x < width; x += stepX) {
         const i = (Math.floor(y) * width + Math.floor(x)) * 4 + 3;
@@ -594,7 +589,27 @@
     return { cells, width, height, stepX };
   }
 
-  const title = buildTitle(screen.getAttribute('aria-label'));
+  const title = buildTitle(screen.getAttribute('aria-label'), 2, 2.25, [
+    [0, 1, 0.86, 0], [3, -1, 0.65, 0.02], [8, -1, 0.78, 0],
+    [16, 1, 0.58, 0.12], [17, -1, 0.83, 0.04],
+  ]);
+  const prompt = buildTitle('click', 4.5, 4.8);
+
+  function drawClickPrompt(elapsed) {
+    const scale = 76 / prompt.width;
+    const x0 = (viewportWidth - prompt.width * scale) / 2;
+    const y0 = viewportHeight * 0.58 - prompt.height * scale / 2;
+    sctx.save();
+    sctx.font = `bold ${prompt.stepX * scale * 1.68}px Menlo, Consolas, monospace`;
+    sctx.textAlign = 'center';
+    sctx.textBaseline = 'middle';
+    sctx.fillStyle = PALETTES[1].petal;
+    sctx.globalAlpha = smooth(0.42, 0.8, elapsed) * 0.88;
+    for (const cell of prompt.cells) {
+      sctx.fillText('#', x0 + cell.x * scale, y0 + cell.y * scale);
+    }
+    sctx.restore();
+  }
 
   function drawTitle(elapsed, centerY, bouquetPixels) {
     const width = Math.min(viewportWidth * 0.94, Math.max(viewportWidth * 0.65, 500), viewportHeight * 1.19);
@@ -653,7 +668,7 @@
     off.height = rows;
   }
 
-  function render(S, pal, elapsed) {
+  function render(S, pal, elapsed, waiting) {
     // Fit the bouquet in CSS pixels so denser cells keep the same composition scale.
     const scale = Math.min(viewportWidth / WORLD_W, viewportHeight / WORLD_H) * 0.96;
     const dx = (viewportWidth - WORLD_W * scale) / 2;
@@ -678,6 +693,7 @@
     sctx.drawImage(off, 0, 0, cols * cellW, rows * cellH);
     sctx.restore();
     drawTitle(elapsed, dy + 151 * scale, data);
+    if (waiting) drawClickPrompt(elapsed);
     const n = RAMP.length - 1;
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
@@ -697,8 +713,12 @@
   // ---------- loop ----------
   const S = buildScene();
   S.whiteLilies = S.buds.filter(b => b.white);
-  let palette = 0;
-  let t0 = performance.now();
+  const startButton = document.getElementById('start-bloom');
+  const q = new URLSearchParams(location.search);
+  const previewOffset = Math.max(0, Number(q.get('t')) || 0);
+  let palette = clamp(+q.get('p') | 0, 0, PALETTES.length - 1);
+  const introAt = performance.now();
+  let bloomAt = null;
   let last = 0;
 
   function frame(now) {
@@ -707,23 +727,31 @@
     const elapsed = now - last;
     if (elapsed < interval) return;
     last = now - elapsed % interval;
-    const seconds = (now - t0) / 1000;
-    T = Math.max(0, (seconds - INTRO_DURATION) * PLAYBACK_RATE);
-    render(S, PALETTES[palette], seconds);
+    T = bloomAt === null ? 0 : Math.max(0, (now - bloomAt) * PLAYBACK_RATE / 1000);
+    render(S, PALETTES[palette], (now - introAt) / 1000, bloomAt === null);
   }
 
-  const replay = () => { t0 = performance.now(); };
+  function replay() {
+    const now = performance.now();
+    if (bloomAt !== null) {
+      bloomAt = now;
+      return;
+    }
+    bloomAt = Math.max(now, introAt + INTRO_DURATION * 1000) - previewOffset * 1000 / PLAYBACK_RATE;
+    startButton.hidden = true;
+    window.dispatchEvent(new Event('bouquet-start'));
+  }
+
   window.addEventListener('resize', resize);
   screen.addEventListener('click', replay);
+  startButton.addEventListener('click', replay);
   window.addEventListener('keydown', (e) => {
-    if (e.key === ' ' || e.key === 'r') replay();
-    if (e.key === 'p' || e.key === 'c') { palette = (palette + 1) % PALETTES.length; replay(); }
+    if (bloomAt !== null && (e.key === ' ' || e.key === 'r')) replay();
+    if (e.key === 'p' || e.key === 'c') {
+      palette = (palette + 1) % PALETTES.length;
+      if (bloomAt !== null) replay();
+    }
   });
-
-  // ?t=8 starts 8s into the bloom, ?p=1 picks a palette
-  const q = new URLSearchParams(location.search);
-  if (q.has('p')) palette = clamp(+q.get('p') | 0, 0, PALETTES.length - 1);
-  if (q.has('t')) t0 -= (INTRO_DURATION + +q.get('t') / PLAYBACK_RATE) * 1000;
 
   resize();
   requestAnimationFrame(frame);

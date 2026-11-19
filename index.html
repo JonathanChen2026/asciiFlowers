@@ -7,10 +7,26 @@
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   canvas { display: block; width: 100vw; height: 100vh; cursor: pointer; }
+  #start-bloom {
+    position: fixed;
+    top: 58%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 96px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #f6f2ea;
+    cursor: pointer;
+  }
+  #start-bloom:focus-visible { outline: 1px solid currentColor; outline-offset: 3px; }
 </style>
 </head>
 <body>
 <canvas id="screen" role="img" aria-label="HAPPY BIRTHDAY MOM!"></canvas>
+<button type="button" id="start-bloom" aria-label="Click to start the bouquet and music"></button>
 <script src="bouquet.js"></script>
+<script src="soundtrack.js"></script>
 </body>
 </html>
