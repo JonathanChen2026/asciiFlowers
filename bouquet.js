@@ -12,6 +12,8 @@
   const WORLD_W = 1000;
   const WORLD_H = 1100;
   const FPS = 30;
+  const PLAYBACK_RATE = 1.5;
+  const INTRO_DURATION = 0.78;
 
   const PALETTES = [
     { // pink lilies, like the photos
@@ -73,7 +75,8 @@
   let T = 0;
   function sway(x, y) {
     const lift = clamp((1090 - y) / 800, 0, 1);
-    return [x + Math.sin(T * 0.9 + y * 0.006) * 8 * lift + Math.sin(T * 0.43 + x * 0.004) * 4 * lift, y];
+    const spread = (x - WORLD_W / 2) * 0.12 * lift;
+    return [x + spread + Math.sin(T * 0.9 + y * 0.006) * 8 * lift + Math.sin(T * 0.43 + x * 0.004) * 4 * lift, y];
   }
 
   // ---------- scene ----------
@@ -83,6 +86,8 @@
   const BUD_START = 2.2;
   const BLUSH_START = 3.6;
   const OPEN_START = 5.0, OPEN_GAP = 0.85, OPEN_DUR = 3.2;
+  const LAST_PINK_BLOOM = 6;
+  const RED_BUD_TIPS = { 18: [28, -65, -78], 19: [90, -18, -38], 20: [-65, -12, -142] };
 
   function buildScene() {
     const r = rng(11);
@@ -136,15 +141,38 @@
       b.droop = rad((b.dir > rad(-90) ? 1 : -1) * (15 + r() * 20));
       b.colorIdx = rank;
       b.rnd = Array.from({ length: 12 }, r);
-      b.grow = BUD_START + r() * 1.2;
+      // The upper stem uses the final half of the cubic easing curve.
+      const attach = 1 - Math.cbrt((1 - b.at) / 4);
+      b.stalkStart = b.stemRef.start + STEM_DUR * attach;
+      b.grow = Math.max(BUD_START + r() * 1.2, b.stalkStart + (b.ped ? 1 : 0));
+      b.white = rank === 7 || rank === 8;
+      const redTip = RED_BUD_TIPS[rank];
+      b.red = Boolean(redTip);
       if (rank < 7) {
         b.maxOpen = 1; b.blush = 1; b.openAt = OPEN_START + rank * OPEN_GAP + r() * 0.3;
       } else if (rank < 11) {
-        b.maxOpen = 0.08; b.blush = 0.8; b.openAt = OPEN_START + 2 + r() * 4;
+        b.maxOpen = b.white ? 1 : 0.08;
+        b.blush = 0.8;
+        b.openAt = OPEN_START + 2 + r() * 4;
       } else {
         b.maxOpen = 0; b.blush = 0.1 + r() * 0.2; b.openAt = Infinity; b.len *= 0.75;
       }
+      if (b.red) {
+        b.blush = 1;
+        b.len *= 0.75;
+        b.width *= 0.8;
+        if (b.ped) {
+          const [dx, dy, angle] = redTip;
+          b.ped[2][0] += dx * 0.5;
+          b.ped[2][1] += dy * 0.5;
+          b.ped[3][0] += dx;
+          b.ped[3][1] += dy;
+          b.dir = rad(angle);
+        }
+      }
     });
+    // Use the mature depth order throughout the animation to avoid swapping overlaps mid-bloom.
+    S.buds.sort((a, b) => a.maxOpen - b.maxOpen || a.openAt - b.openAt);
     addFillers(S);
     return S;
   }
@@ -272,27 +300,29 @@
   }
 
   // One tepal along +x. Closed, six of these overlap into the club-shaped bud;
-  // open, they fan out and their tips curl back.
-  function tepal(g, L, W, color, edge, throat, vein, open, curl, spots, rnd) {
+  // open, they fan out and their tips sag in the direction of gravity.
+  function tepal(g, L, W, color, edge, throat, vein, open, curl, spots, rnd, shade, sagX, sagY) {
     const rc = smooth(0.45, 1, open);
-    const tipX = L * (1 - 0.12 * rc), tipY = curl * W * 1.6 * rc;
+    const bend = curl * W * 0.95 * rc;
+    const tipX = L * (1 - 0.09 * rc) + sagX;
+    const tipY = bend + sagY;
+    const outerX = L * 0.72 + sagX * 0.42;
+    const outerY = bend * 0.3 + sagY * 0.42;
     g.beginPath();
     g.moveTo(0, 0);
-    g.bezierCurveTo(L * 0.3, -W * 0.85, L * 0.72, -W * 1.05 + tipY * 0.3, tipX, tipY);
-    g.bezierCurveTo(L * 0.72, W * 1.05 + tipY * 0.3, L * 0.3, W * 0.85, 0, 0);
-    const grad = g.createLinearGradient(0, 0, L, 0);
+    g.bezierCurveTo(L * 0.3, -W * 0.85, outerX, outerY - W * 1.05, tipX, tipY);
+    g.bezierCurveTo(outerX, outerY + W * 1.05, L * 0.3, W * 0.85, 0, 0);
+    const grad = g.createLinearGradient(0, -W * shade, L, W * shade);
     grad.addColorStop(0, throat);
-    grad.addColorStop(lerp(0.45, 0.22, open), color);
+    grad.addColorStop(lerp(0.45, 0.22, open), shade ? mix(color, '#515b54', shade) : color);
+    if (shade) grad.addColorStop(0.68, color);
     grad.addColorStop(1, edge);
     g.fillStyle = grad;
     g.fill();
-    g.strokeStyle = 'rgba(0,0,0,0.65)';
-    g.lineWidth = 6;
-    g.stroke();
     // seam on the bud, nectar groove on the open tepal
     g.strokeStyle = open > 0.2 ? vein : 'rgba(40,70,20,0.55)';
-    g.lineWidth = 5;
-    g.beginPath(); g.moveTo(L * 0.05, 0); g.quadraticCurveTo(L * 0.6, tipY * 0.2, tipX * 0.94, tipY * 0.9); g.stroke();
+    g.lineWidth = lerp(5, 3, rc);
+    g.beginPath(); g.moveTo(L * 0.05, 0); g.quadraticCurveTo(tipX * 0.42, tipY * 0.12, tipX * 0.68, tipY * 0.48); g.stroke();
     if (spots && open > 0.6) {
       g.fillStyle = `rgba(110,15,40,${(open - 0.6) * 2})`;
       for (let i = 0; i < 4; i++) {
@@ -311,60 +341,79 @@
   }
 
   function drawBud(g, b, pal) {
-    const sp = stemProgress(b.stemRef);
     if (b.ped) {
-      if (sp < b.at) return;
-      const pp = easeOut(prog(T, b.stemRef.start + STEM_DUR * b.at, 1.0));
+      const pp = easeOut(prog(T, b.stalkStart, 1));
       strokeCurve(g, b.ped, 0, pp, 5, '#5f9a34');
-      if (pp < 0.6) return;
-    } else if (sp < 0.98) {
-      return;
     }
     const { grow, blush, open } = budState(b);
     if (!grow) return;
 
     const base = b.ped ? b.ped[3] : bez(b.stem, 1);
     const [x, y] = sway(base[0], base[1]);
+    if (pal === PALETTES[0] && b.white) pal = PALETTES[1];
+    const white = pal === PALETTES[1];
     const multi = Array.isArray(pal.petal);
     const petal = multi ? pal.petal[b.colorIdx % pal.petal.length] : pal.petal;
     const edge = pal.edge || mix(petal, '#ffffff', 0.25);
 
     // bud colour: green → dusty pink as it matures → petal colour as it opens
-    const budCol = mix('#9cc63e', pal.blush, blush);
+    const budCol = mix('#9cc63e', b.red ? '#cb233c' : pal.blush, blush);
     const color = mix(budCol, petal, smooth(0.05, 0.45, open));
-    const edgeCol = mix(mix('#b4d860', pal.blush, blush), edge, smooth(0.05, 0.45, open));
-    const throat = mix('#8fbf3a', pal.throat, open);
+    const edgeCol = mix(mix('#b4d860', b.red ? '#ff655f' : pal.blush, blush), edge, smooth(0.05, 0.45, open));
+    const throat = mix('#8fbf3a', white ? '#777a3e' : pal.throat, open);
 
-    const L = b.len * (0.3 + 0.7 * grow) * (1 + 0.3 * open);
-    const W = b.width * (0.6 + 0.4 * grow) * (1 + 1.4 * open);
+    const L = b.len * (1 + 0.3 * open);
+    const W = b.width * (1 + 1.4 * open);
+    const weight = smooth(0.18, 1, open);
+    const nod = Math.sin(T * 0.85 + b.colorIdx * 0.8) * rad(2.5) * weight;
+    const headAngle = b.dir + b.droop * 1.22 * weight + nod;
+    const squash = lerp(1, white ? Math.max(b.squash, 0.85) : b.squash, open);
+    const twist = b.twist * open;
 
     g.save();
     g.translate(x, y);
-    g.rotate(b.dir + b.droop * open);
-    g.scale(1, lerp(1, b.squash, open));
+    g.rotate(headAngle);
+    g.scale(grow, grow * squash);
     // short green receptacle where the bud meets the pedicel
     g.fillStyle = '#5f9a34';
     g.beginPath(); g.ellipse(0, 0, 9, 7, 0, 0, Math.PI * 2); g.fill();
-    g.rotate(b.twist * open);
+    g.rotate(twist);
+    // Convert screen-down into the unscaled coordinates of the flower.
+    const downX = Math.sin(headAngle);
+    const downY = Math.cos(headAngle) / squash;
+    const vein = white ? 'rgba(111,119,75,0.42)' : pal.vein;
     // back three tepals first, then the front three
     for (const k of [3, 1, -1, 2, -2, 0]) {
       g.save();
-      g.rotate(rad(k * 60) * open);
-      const wob = 1 + (b.rnd[(k + 3) % 12] - 0.5) * 0.12 * open;
-      tepal(g, L * wob, W, color, edgeCol, throat, pal.vein, open, k === 0 ? 0.3 : Math.sign(k) || 1, pal.spots, b.rnd);
+      const variation = b.rnd[k + 3] - 0.5;
+      const unfurl = open + variation * 0.62 * open * (1 - open);
+      const fan = rad(k * 60 * unfurl + variation * 17 * open);
+      g.rotate(fan);
+      const length = L * (1 + variation * 0.22 * open);
+      const curl = k === 0 ? 0.3 : Math.sign(k);
+      const shade = white ? weight * (Math.abs(k) % 2 ? 0.48 : 0.32) : 0;
+      const droop = length * weight * (0.17 + b.rnd[k + 6] * 0.12);
+      const angle = twist + fan;
+      const sagX = droop * (downX * Math.cos(angle) + downY * Math.sin(angle));
+      const sagY = droop * (downY * Math.cos(angle) - downX * Math.sin(angle));
+      tepal(g, length, W, color, edgeCol, throat, vein, unfurl, curl, pal.spots, b.rnd, shade, sagX, sagY);
       g.restore();
     }
     // stamens and pistil reach out once the tepals have parted
     const st = smooth(0.55, 1, open);
     if (st > 0) {
+      if (white) {
+        g.fillStyle = '#a4a151';
+        g.beginPath(); g.ellipse(0, 0, 16 * st, 13 * st, 0, 0, Math.PI * 2); g.fill();
+      }
       for (let i = 0; i < 6; i++) {
-        const a = rad(-28 + i * 11);
-        const l = L * 0.72 * st * (0.92 + b.rnd[i] * 0.16);
-        g.strokeStyle = '#d6dca8';
-        g.lineWidth = 3;
+        const a = rad(white ? -55 + i * 20 : -28 + i * 11);
+        const l = L * (white ? 0.56 : 0.72) * st * (0.92 + b.rnd[i] * 0.16);
+        g.strokeStyle = white ? '#9e9d44' : '#d6dca8';
+        g.lineWidth = white ? 5 : 3;
         g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(l * 0.5, a * l * 0.3, Math.cos(a) * l, Math.sin(a) * l); g.stroke();
-        g.fillStyle = pal.anther;
-        g.beginPath(); g.ellipse(Math.cos(a) * l, Math.sin(a) * l, 11, 4.5, a + Math.PI / 2, 0, Math.PI * 2); g.fill();
+        g.fillStyle = white ? '#a7481c' : pal.anther;
+        g.beginPath(); g.ellipse(Math.cos(a) * l, Math.sin(a) * l, 11, white ? 6.5 : 4.5, a + Math.PI / 2, 0, Math.PI * 2); g.fill();
       }
       const pl = L * 0.82 * st;
       g.strokeStyle = '#cfe0a0';
@@ -450,10 +499,14 @@
     drawGyp(g, S, false);
     for (const st of S.stems) strokeCurve(g, st.pts, 0, stemProgress(st), 9, '#5a9a30');
     for (const lf of S.leaves) drawLeaf(g, lf);
-    // closed buds behind, then open flowers in the order they opened
-    const sorted = S.buds.slice().sort((a, b) => budState(a).open - budState(b).open || (a.openAt - b.openAt || 0));
-    for (const b of sorted) drawBud(g, b, pal);
+    for (const b of S.buds) {
+      if (pal === PALETTES[0] && (b.white || b.colorIdx === LAST_PINK_BLOOM)) continue;
+      drawBud(g, b, pal);
+    }
     drawGyp(g, S, true);
+    if (pal === PALETTES[0]) {
+      for (const b of S.whiteLilies) drawBud(g, b, pal);
+    }
   }
 
   // ---------- ascii renderer ----------
@@ -462,7 +515,85 @@
   const off = document.createElement('canvas');
   const octx = off.getContext('2d', { willReadFrequently: true });
 
-  let cols = 0, rows = 0, cellW = 0, cellH = 0, fontSize = 0, dpr = 1;
+  function buildTitle(message) {
+    const font = 'bold 96px Georgia, "Times New Roman", serif';
+    const padding = 8;
+    const tracking = 7;
+    const mask = document.createElement('canvas');
+    const ctx = mask.getContext('2d');
+    ctx.font = font;
+    const metrics = ctx.measureText(message);
+    let x = padding;
+    const letters = Array.from(message, letter => {
+      const position = x;
+      x += ctx.measureText(letter).width + tracking;
+      return { letter, x: position };
+    });
+    const width = Math.ceil(x - tracking + padding);
+    const baseline = Math.ceil(padding + metrics.actualBoundingBoxAscent);
+    const height = Math.ceil(baseline + metrics.actualBoundingBoxDescent + padding);
+    mask.width = width;
+    mask.height = height;
+    ctx.font = font;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#fff';
+
+    // Use the font's own contours for both outlines, with a uniform gap.
+    ctx.lineWidth = 10;
+    for (const letter of letters) ctx.strokeText(letter.letter, letter.x, baseline);
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.lineWidth = 4;
+    for (const letter of letters) ctx.strokeText(letter.letter, letter.x, baseline);
+
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    const cells = [];
+    const stepX = 2.25;
+    const stepY = 2.45;
+    for (let y = stepY / 2; y < height; y += stepY) {
+      for (let x = stepX / 2; x < width; x += stepX) {
+        const i = (Math.floor(y) * width + Math.floor(x)) * 4 + 3;
+        if (pixels[i] < 116) continue;
+        const seed = Math.floor(x * 19 + y * 23);
+        const delay = (1 - y / height) * 0.34 + (seed % 11) * 0.008;
+        cells.push({ x, y, seed, delay });
+      }
+    }
+    return { cells, width, height, stepX };
+  }
+
+  const title = buildTitle(screen.getAttribute('aria-label'));
+
+  function drawTitle(elapsed, centerY, bouquetPixels) {
+    const width = Math.min(viewportWidth * 0.94, Math.max(viewportWidth * 0.65, 500), viewportHeight * 1.19);
+    const scaleX = width / title.width;
+    const scaleY = scaleX * 1.28;
+    const x0 = (viewportWidth - width) / 2;
+    const y0 = centerY - title.height * scaleY / 2;
+    const tick = Math.floor(elapsed * 22);
+    sctx.save();
+    sctx.font = `bold ${title.stepX * scaleX * 1.68}px Menlo, Consolas, "DejaVu Sans Mono", monospace`;
+    sctx.textAlign = 'center';
+    sctx.textBaseline = 'middle';
+    sctx.fillStyle = PALETTES[1].petal;
+    for (const cell of title.cells) {
+      const age = elapsed - cell.delay;
+      if (age <= 0) continue;
+      const x = x0 + cell.x * scaleX;
+      const y = y0 + cell.y * scaleY;
+      // Hide lit title cells wherever the bouquet passes in front.
+      const i = (Math.floor(y / cellH) * cols + Math.floor(x / cellW)) * 4;
+      if (Math.max(bouquetPixels[i], bouquetPixels[i + 1], bouquetPixels[i + 2]) >= 17) continue;
+      sctx.globalAlpha = smooth(0, 0.24, age);
+      const glyph = age < 0.2
+        ? RAMP[1 + (cell.seed + tick * 7) % (RAMP.length - 1)]
+        : '#';
+      sctx.fillText(glyph, x, y);
+    }
+    sctx.restore();
+  }
+
+  let cols = 0, rows = 0, cellW = 0, cellH = 0, dpr = 1;
+  let viewportWidth = 0, viewportHeight = 0;
   const styleCache = new Map();
   function style(r, g, b) {
     const key = (r << 16) | (g << 8) | b;
@@ -473,56 +604,57 @@
 
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = window.innerWidth, h = window.innerHeight;
-    fontSize = clamp(Math.floor(Math.min(w / 100, h / 85)), 5, 11);
+    viewportWidth = window.innerWidth;
+    viewportHeight = window.innerHeight;
+    const fontSize = clamp(Math.floor(Math.min(viewportWidth / 130, viewportHeight / 110)), 5, 9);
+    screen.width = Math.round(viewportWidth * dpr);
+    screen.height = Math.round(viewportHeight * dpr);
+    // Resizing the canvas resets the context, including the font.
     sctx.font = `bold ${fontSize}px Menlo, Consolas, "DejaVu Sans Mono", monospace`;
+    sctx.textBaseline = 'top';
     cellW = sctx.measureText('M').width || fontSize * 0.6;
     cellH = fontSize;
-    screen.width = Math.floor(w * dpr);
-    screen.height = Math.floor(h * dpr);
-    cols = Math.ceil(w / cellW);
-    rows = Math.ceil(h / cellH);
+    cols = Math.ceil(viewportWidth / cellW);
+    rows = Math.ceil(viewportHeight / cellH);
     off.width = cols;
     off.height = rows;
   }
 
-  function render(S, pal) {
-    // paint the scene into the low-res buffer, correcting for tall character cells
-    const aspect = cellH / cellW;
-    const sx = Math.min(cols / WORLD_W, (rows * aspect) / WORLD_H) * 0.96;
+  function render(S, pal, elapsed) {
+    // Fit the bouquet in CSS pixels so denser cells keep the same composition scale.
+    const scale = Math.min(viewportWidth / WORLD_W, viewportHeight / WORLD_H) * 0.96;
+    const dx = (viewportWidth - WORLD_W * scale) / 2;
+    const dy = (viewportHeight - WORLD_H * scale) / 2;
     octx.setTransform(1, 0, 0, 1, 0, 0);
     octx.fillStyle = '#000';
     octx.fillRect(0, 0, cols, rows);
-    octx.setTransform(sx, 0, 0, sx / aspect, (cols - WORLD_W * sx) / 2, (rows - (WORLD_H * sx) / aspect) / 2);
+    octx.setTransform(scale / cellW, 0, 0, scale / cellH, dx / cellW, dy / cellH);
 
-    drawScene(octx, S, pal);
+    if (T > 0) drawScene(octx, S, pal);
 
     const data = octx.getImageData(0, 0, cols, rows).data;
-    sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
     sctx.fillStyle = '#000';
     sctx.fillRect(0, 0, screen.width, screen.height);
-    // soft glow of the same image underneath the glyphs, like a CRT bloom
+    sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Keep the glow close to the glyphs so fine outlines stay legible.
     sctx.save();
-    sctx.globalAlpha = 0.42;
-    sctx.filter = `blur(${Math.round(cellH * 0.4)}px)`;
+    sctx.globalAlpha = 0.23;
+    sctx.filter = `blur(${cellH * dpr * 0.24}px)`;
     sctx.imageSmoothingEnabled = true;
     sctx.drawImage(off, 0, 0, cols * cellW, rows * cellH);
     sctx.restore();
-    sctx.textBaseline = 'top';
+    drawTitle(elapsed, dy + 151 * scale, data);
     const n = RAMP.length - 1;
-    const flick = Math.floor(T * 8);
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
         const i = (y * cols + x) * 4;
         const r = data[i], g = data[i + 1], b = data[i + 2];
         const m = Math.max(r, g, b);
-        if (m < 14) continue;
+        if (m < 17) continue;
         const v = m / 255;
-        // a little shimmer so the glyphs feel alive
-        const h = ((x * 73856093) ^ (y * 19349663) ^ (flick * 83492791)) >>> 0;
-        const j = h % 7 === 0 ? (h & 8 ? 1 : -1) : 0;
-        const idx = clamp(Math.round(Math.pow(v, 0.7) * n) + j, 1, n);
-        const k = Math.min(1.25, (40 + 215 * v) / m);
+        const idx = Math.max(1, Math.round(Math.pow(v, 0.79) * n));
+        const k = 0.92 + 0.19 * v;
         sctx.fillStyle = style(Math.min(255, (r * k) | 0) & 0xf8, Math.min(255, (g * k) | 0) & 0xf8, Math.min(255, (b * k) | 0) & 0xf8);
         sctx.fillText(RAMP[idx], x * cellW, y * cellH);
       }
@@ -531,16 +663,20 @@
 
   // ---------- loop ----------
   const S = buildScene();
+  S.whiteLilies = S.buds.filter(b => b.white);
   let palette = 0;
   let t0 = performance.now();
   let last = 0;
 
   function frame(now) {
     requestAnimationFrame(frame);
-    if (now - last < 1000 / FPS) return;
-    last = now;
-    T = (now - t0) / 1000;
-    render(S, PALETTES[palette]);
+    const interval = 1000 / FPS;
+    const elapsed = now - last;
+    if (elapsed < interval) return;
+    last = now - elapsed % interval;
+    const seconds = (now - t0) / 1000;
+    T = Math.max(0, (seconds - INTRO_DURATION) * PLAYBACK_RATE);
+    render(S, PALETTES[palette], seconds);
   }
 
   const replay = () => { t0 = performance.now(); };
@@ -554,7 +690,7 @@
   // ?t=8 starts 8s into the bloom, ?p=1 picks a palette
   const q = new URLSearchParams(location.search);
   if (q.has('p')) palette = clamp(+q.get('p') | 0, 0, PALETTES.length - 1);
-  if (q.has('t')) t0 = performance.now() - +q.get('t') * 1000;
+  if (q.has('t')) t0 -= (INTRO_DURATION + +q.get('t') / PLAYBACK_RATE) * 1000;
 
   resize();
   requestAnimationFrame(frame);

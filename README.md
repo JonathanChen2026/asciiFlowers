@@ -1,12 +1,12 @@
 # ASCII Lilies
 
-A bunch of lilies with ruscus greenery and baby's breath that grows and blooms in coloured ASCII on a black background.
+A bunch of pink and white lilies with ruscus greenery and baby's breath that grows and blooms in coloured ASCII on a black background.
 
 Open `index.html` in a browser. It has no dependencies or build step. You can also serve the folder with any static server, for example `npx serve` or VS Code Live Server.
 
 ## The bloom
 
-It follows how cut lilies open over a few days, sped up to about 15 seconds:
+It follows how cut lilies open over a few days, sped up to about 10 seconds:
 
 1. Tall stems rise from a gathered bunch and lance-shaped leaves unfurl along them. Arching sprigs of ruscus fan out around them, with glossy leaves alternating up each sprig.
 2. Each stem ends in a cluster of long green buds on short side stalks, which swell.
@@ -19,12 +19,12 @@ After that it keeps swaying gently.
 ## Controls
 
 - **Click, Space or `R`**: replay the bloom
-- **`P`**: switch colours (pink → white → mixed garden)
+- **`P`**: switch colours (pink and white → white → mixed garden)
 
 ## URL options
 
 - `?p=1` picks the starting colours (0, 1 or 2)
-- `?t=8` starts 8 seconds into the bloom
+- `?t=8` starts at second 8 on the bloom timeline, which plays at 1.5× speed
 
 ## How it works
 
