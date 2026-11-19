@@ -515,21 +515,42 @@
   const off = document.createElement('canvas');
   const octx = off.getContext('2d', { willReadFrequently: true });
 
+  function drawTitleVine(ctx, x, baseline, width, height, direction) {
+    ctx.save();
+    ctx.translate(x, baseline);
+    ctx.scale(direction * width, height);
+    ctx.lineWidth = 0.047;
+    ctx.beginPath();
+    ctx.moveTo(0.46, -0.82);
+    ctx.bezierCurveTo(-0.42, -1.08, -0.5, -0.62, -0.04, -0.43);
+    ctx.bezierCurveTo(0.46, -0.23, 0.42, 0.07, -0.16, 0.17);
+    ctx.stroke();
+    for (const [leafX, leafY, angle] of [
+      [-0.29, -0.67, -2.1], [-0.15, -0.48, 2.95], [0.16, -0.3, -1.55],
+      [0.23, -0.07, 0.85], [-0.11, 0.16, 2.75],
+    ]) {
+      ctx.save();
+      ctx.translate(leafX, leafY);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(0.07, -0.085, 0.19, 0);
+      ctx.quadraticCurveTo(0.07, 0.07, 0, 0);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
   function buildTitle(message) {
-    const font = 'bold 96px Georgia, "Times New Roman", serif';
-    const padding = 8;
-    const tracking = 7;
+    const font = '96px Didot, "Bodoni 72", Georgia, serif';
+    const padding = 18;
     const mask = document.createElement('canvas');
     const ctx = mask.getContext('2d');
     ctx.font = font;
     const metrics = ctx.measureText(message);
-    let x = padding;
-    const letters = Array.from(message, letter => {
-      const position = x;
-      x += ctx.measureText(letter).width + tracking;
-      return { letter, x: position };
-    });
-    const width = Math.ceil(x - tracking + padding);
+    const x = padding + metrics.actualBoundingBoxLeft;
+    const width = Math.ceil(x + metrics.actualBoundingBoxRight + padding);
     const baseline = Math.ceil(padding + metrics.actualBoundingBoxAscent);
     const height = Math.ceil(baseline + metrics.actualBoundingBoxDescent + padding);
     mask.width = width;
@@ -537,25 +558,37 @@
     ctx.font = font;
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#fff';
+    ctx.fillStyle = '#fff';
 
-    // Use the font's own contours for both outlines, with a uniform gap.
-    ctx.lineWidth = 10;
-    for (const letter of letters) ctx.strokeText(letter.letter, letter.x, baseline);
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.lineWidth = 4;
-    for (const letter of letters) ctx.strokeText(letter.letter, letter.x, baseline);
+    ctx.globalAlpha = 0.74;
+    for (const [index, direction, length, drop] of [
+      [0, 1, 0.86, 0], [3, -1, 0.65, 0.02], [8, -1, 0.78, 0],
+      [16, 1, 0.58, 0.12], [17, -1, 0.83, 0.04],
+    ]) {
+      const advance = ctx.measureText(message[index]).width;
+      const left = x + ctx.measureText(message.slice(0, index)).width;
+      const anchor = left + advance * (direction > 0 ? 0.22 : 0.82);
+      const capHeight = metrics.actualBoundingBoxAscent;
+      drawTitleVine(ctx, anchor, baseline + capHeight * drop, advance * length, capHeight * (1 - drop), direction);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillText(message, x, baseline);
+    // Give the font's hairlines enough coverage to survive the ASCII grid.
+    ctx.lineWidth = 1.5;
+    ctx.strokeText(message, x, baseline);
 
     const pixels = ctx.getImageData(0, 0, width, height).data;
     const cells = [];
-    const stepX = 2.25;
-    const stepY = 2.45;
+    const stepX = 2;
+    const stepY = 2.25;
     for (let y = stepY / 2; y < height; y += stepY) {
       for (let x = stepX / 2; x < width; x += stepX) {
         const i = (Math.floor(y) * width + Math.floor(x)) * 4 + 3;
-        if (pixels[i] < 116) continue;
+        const coverage = pixels[i] / 255;
+        if (coverage < 0.32) continue;
         const seed = Math.floor(x * 19 + y * 23);
         const delay = (1 - y / height) * 0.34 + (seed % 11) * 0.008;
-        cells.push({ x, y, seed, delay });
+        cells.push({ x, y, seed, delay, coverage });
       }
     }
     return { cells, width, height, stepX };
@@ -583,7 +616,7 @@
       // Hide lit title cells wherever the bouquet passes in front.
       const i = (Math.floor(y / cellH) * cols + Math.floor(x / cellW)) * 4;
       if (Math.max(bouquetPixels[i], bouquetPixels[i + 1], bouquetPixels[i + 2]) >= 17) continue;
-      sctx.globalAlpha = smooth(0, 0.24, age);
+      sctx.globalAlpha = smooth(0, 0.24, age) * (0.52 + 0.48 * cell.coverage);
       const glyph = age < 0.2
         ? RAMP[1 + (cell.seed + tick * 7) % (RAMP.length - 1)]
         : '#';
